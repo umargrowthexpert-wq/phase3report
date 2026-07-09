@@ -1,0 +1,291 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ---------- Auth (NextAuth) ----------
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ---------- Core ----------
+
+enum Role {
+  AGENCY_OWNER
+  SEO_MANAGER
+  CONTENT_WRITER
+  TEAM_MEMBER
+  CLIENT
+}
+
+enum ClientStatus {
+  ACTIVE
+  PAUSED
+  ONBOARDING
+  CHURNED
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  WON
+  LOST
+}
+
+enum BookingStatus {
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TaskStatus {
+  PLANNED
+  IN_PROGRESS
+  DONE
+}
+
+enum Provider {
+  SEARCH_CONSOLE
+  GA4
+  BUSINESS_PROFILE
+}
+
+model Agency {
+  id             String   @id @default(cuid())
+  name           String
+  logoUrl        String?
+  primaryColor   String   @default("#0d1426")
+  secondaryColor String   @default("#2563eb")
+  website        String?
+  email          String?
+  phone          String?
+  reportFooter   String?
+  createdAt      DateTime @default(now())
+  users          User[]
+  clients        Client[]
+  notifications  Notification[]
+}
+
+model User {
+  id        String   @id @default(cuid())
+  name      String?
+  email     String   @unique
+  image     String?
+  role      Role     @default(TEAM_MEMBER)
+  agencyId  String?
+  agency    Agency?  @relation(fields: [agencyId], references: [id])
+  accounts  Account[]
+  sessions  Session[]
+  managedClients Client[] @relation("ClientManager")
+  workLogs  WorkLogEntry[]
+  emailVerified DateTime?
+}
+
+model Client {
+  id             String       @id @default(cuid())
+  agencyId       String
+  agency         Agency       @relation(fields: [agencyId], references: [id])
+  businessName   String
+  website        String?
+  logoUrl        String?
+  industry       String?
+  locations      String[]     @default([])
+  services       String[]     @default([])
+  campaignStart  DateTime?
+  monthlyBudget  Decimal?     @db.Decimal(10, 2)
+  managerId      String?
+  manager        User?        @relation("ClientManager", fields: [managerId], references: [id])
+  notes          String?
+  status         ClientStatus @default(ONBOARDING)
+  createdAt      DateTime     @default(now())
+
+  integrations   IntegrationAccount[]
+  metrics        MetricSnapshot[]
+  leads          Lead[]
+  bookings       Booking[]
+  keywords       Keyword[]
+  workLogs       WorkLogEntry[]
+  reports        Report[]
+  notifications  Notification[]
+
+  @@index([agencyId])
+}
+
+// One row per connected Google product per client
+model IntegrationAccount {
+  id           String   @id @default(cuid())
+  clientId     String
+  client       Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  provider     Provider
+  accessToken  String?
+  refreshToken String?
+  expiresAt    DateTime?
+  propertyId   String?  // GSC site URL / GA4 property ID / GBP location name
+  createdAt    DateTime @default(now())
+
+  @@unique([clientId, provider])
+}
+
+// Daily metric history from any source. `metrics` is a JSON bag, e.g.
+// GSC:  { clicks, impressions, ctr, position }
+// GA4:  { users, sessions, organicUsers, conversions, engagementRate, revenue }
+// GBP:  { calls, websiteClicks, directions, mapViews, searchViews, reviews, avgRating }
+model MetricSnapshot {
+  id        String   @id @default(cuid())
+  clientId  String
+  client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  source    Provider
+  date      DateTime @db.Date
+  metrics   Json
+  dimensions Json?   // optional breakdowns: topQueries, topPages, devices, countries
+
+  @@unique([clientId, source, date])
+  @@index([clientId, date])
+}
+
+model Lead {
+  id          String     @id @default(cuid())
+  clientId    String
+  client      Client     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  name        String
+  date        DateTime   @default(now())
+  service     String?
+  location    String?
+  source      String?    // gravity_forms, elementor, wpforms, cf7, hubspot, ghl, webhook, csv, sheets, manual
+  landingPage String?
+  status      LeadStatus @default(NEW)
+  value       Decimal?   @db.Decimal(10, 2)
+
+  @@index([clientId, date])
+}
+
+model Booking {
+  id          String        @id @default(cuid())
+  clientId    String
+  client      Client        @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  bookingDate DateTime
+  customer    String
+  service     String?
+  revenue     Decimal?      @db.Decimal(10, 2)
+  staff       String?
+  status      BookingStatus @default(SCHEDULED)
+  leadSource  String?
+
+  @@index([clientId, bookingDate])
+}
+
+model Keyword {
+  id          String   @id @default(cuid())
+  clientId    String
+  client      Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  keyword     String
+  location    String?
+  intent      String?  // informational | commercial | transactional | local
+  landingPage String?
+  volume      Int?
+  notes       String?
+  positions   KeywordPosition[]
+
+  @@index([clientId])
+}
+
+model KeywordPosition {
+  id        String   @id @default(cuid())
+  keywordId String
+  keyword   Keyword  @relation(fields: [keywordId], references: [id], onDelete: Cascade)
+  date      DateTime @db.Date
+  position  Float
+
+  @@unique([keywordId, date])
+}
+
+// Manual SEO work log — feeds directly into monthly reports
+model WorkLogEntry {
+  id          String     @id @default(cuid())
+  clientId    String
+  client      Client     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  userId      String?
+  user        User?      @relation(fields: [userId], references: [id])
+  date        DateTime   @default(now())
+  category    String     // service_pages, blog_posts, gbp_posts, citations, nap_cleanup, schema, technical, internal_linking, images, meta_titles, cwv, content_updates, backlinks, press_releases, landing_pages, local_landing_pages, ai_optimization, entity_seo, semantic_seo, custom
+  description String
+  timeSpentMins Int?
+  priority    Priority   @default(MEDIUM)
+  status      TaskStatus @default(DONE)
+  attachments Json?
+
+  @@index([clientId, date])
+}
+
+model Report {
+  id        String   @id @default(cuid())
+  clientId  String
+  client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  month     String   // "2026-06"
+  sections  Json     // editable section blocks (title, html/markdown, charts, manual notes)
+  aiSummary String?
+  status    String   @default("draft") // draft | final
+  pdfUrl    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([clientId, month])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  agencyId  String
+  agency    Agency   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  clientId  String?
+  client    Client?  @relation(fields: [clientId], references: [id])
+  type      String   // traffic_drop, ranking_drop, negative_review, indexing_issue, lead_drop, booking_drop, review_spike
+  message   String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([agencyId, read])
+}

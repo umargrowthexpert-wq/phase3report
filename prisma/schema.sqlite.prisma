@@ -1,0 +1,199 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "./sqlite-client"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Agency {
+  id             String   @id @default(cuid())
+  name           String
+  logoUrl        String?
+  primaryColor   String   @default("#0d1426")
+  secondaryColor String   @default("#2563eb")
+  website        String?
+  email          String?
+  phone          String?
+  reportFooter   String?
+  createdAt      DateTime @default(now())
+  users          User[]
+  clients        Client[]
+  notifications  Notification[]
+}
+
+model User {
+  id            String   @id @default(cuid())
+  name          String?
+  email         String   @unique
+  image         String?
+  role          String   @default("TEAM_MEMBER")
+  agencyId      String?
+  agency        Agency?  @relation(fields: [agencyId], references: [id])
+  accounts      Account[]
+  sessions      Session[]
+  managedClients Client[] @relation("ClientManager")
+  workLogs      WorkLogEntry[]
+  emailVerified DateTime?
+}
+
+model Client {
+  id             String       @id @default(cuid())
+  agencyId       String
+  agency         Agency       @relation(fields: [agencyId], references: [id])
+  businessName   String
+  website        String?
+  logoUrl        String?
+  industry       String?
+  locations      String?
+  services       String?
+  campaignStart  DateTime?
+  monthlyBudget  Float?
+  managerId      String?
+  manager        User?        @relation("ClientManager", fields: [managerId], references: [id])
+  notes          String?
+  status         String       @default("ONBOARDING")
+  createdAt      DateTime     @default(now())
+
+  integrations   IntegrationAccount[]
+  metrics        MetricSnapshot[]
+  leads          Lead[]
+  bookings       Booking[]
+  workLogs       WorkLogEntry[]
+  notifications  Notification[]
+
+  @@index([agencyId])
+}
+
+model IntegrationAccount {
+  id           String   @id @default(cuid())
+  clientId     String
+  client       Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  provider     String
+  accessToken  String?
+  refreshToken String?
+  expiresAt    DateTime?
+  propertyId   String?
+  createdAt    DateTime @default(now())
+
+  @@unique([clientId, provider])
+}
+
+model MetricSnapshot {
+  id          String   @id @default(cuid())
+  clientId    String
+  client      Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  source      String
+  date        DateTime
+  clicks      Int?
+  impressions Int?
+  ctr         Float?
+  position    Float?
+  users       Int?
+  sessions    Int?
+  conversions Int?
+  engagementRate Float?
+  revenue     Float?
+  dimensions  String?
+
+  @@unique([clientId, source, date])
+  @@index([clientId, date])
+}
+
+model Lead {
+  id          String   @id @default(cuid())
+  clientId    String
+  client      Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  name        String
+  date        DateTime @default(now())
+  service     String?
+  location    String?
+  source      String?
+  landingPage String?
+  status      String   @default("NEW")
+  value       Float?
+
+  @@index([clientId, date])
+}
+
+model Booking {
+  id          String   @id @default(cuid())
+  clientId    String
+  client      Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  bookingDate DateTime
+  customer    String
+  service     String?
+  revenue     Float?
+  staff       String?
+  status      String   @default("SCHEDULED")
+  leadSource  String?
+
+  @@index([clientId, bookingDate])
+}
+
+model WorkLogEntry {
+  id           String   @id @default(cuid())
+  clientId     String
+  client       Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  userId       String?
+  user         User?    @relation(fields: [userId], references: [id])
+  date         DateTime @default(now())
+  category     String
+  description  String
+  timeSpentMins Int?
+  priority     String   @default("MEDIUM")
+  status       String   @default("DONE")
+  attachments  String?
+
+  @@index([clientId, date])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  agencyId  String
+  agency    Agency   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  clientId  String?
+  client    Client?  @relation(fields: [clientId], references: [id])
+  type      String
+  message   String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([agencyId, read])
+}
